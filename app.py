@@ -8,166 +8,371 @@ from pathlib import Path
 import streamlit as st
 import yt_dlp
 
-st.set_page_config(page_title="ZOZO AI", page_icon="🤖", layout="centered")
 
-st.markdown("""
-<style>
-.block-container {max-width: 900px; padding-top: 2.5rem;}
-.hero {text-align:center; padding: 1rem 0 1.5rem;}
-.hero h1 {font-size: 3.2rem; margin-bottom: .3rem;}
-.hero p {font-size: 1.15rem; color:#666;}
-.urlbox {border:1px solid #ddd; border-radius:18px; padding:1rem;}
-.feature {border:1px solid #eee; border-radius:16px; padding:1rem; margin:.5rem 0;}
-</style>
-""", unsafe_allow_html=True)
+# -----------------------------
+# ZOZO AI
+# -----------------------------
 
-st.markdown("""
-<div class="hero">
-<h1>🤖 ZOZO AI</h1>
-<p>Turn long videos into engaging short clips.</p>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("### 🔗 Paste a YouTube video URL")
-url = st.text_input(
-    "YouTube URL",
-    placeholder="https://www.youtube.com/watch?v=...",
-    label_visibility="collapsed",
+st.set_page_config(
+    page_title="ZOZO AI",
+    page_icon="🤖",
+    layout="centered",
 )
 
-st.caption("Your phone only sends the link. ZOZO AI processes the source video on the server.")
 
-duration = st.selectbox("🎬 Clip length", [30, 45, 60], index=1, format_func=lambda x: f"{x} seconds")
-num_clips = st.slider("✂️ Number of clips", 1, 6, 3)
+# -----------------------------
+# Helpers
+# -----------------------------
 
-generate = st.button("🚀 Generate Clips", type="primary", use_container_width=True)
+def run_command(cmd):
+    return subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
-def valid_youtube(u: str) -> bool:
-    return bool(re.match(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", u.strip()))
 
-def run(cmd):
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def valid_youtube(url):
+    pattern = r"^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$"
+    return bool(re.match(pattern, url.strip()))
 
-def get_duration(path):
-    r = run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(path)])
+
+def get_duration(video_path):
+    result = run_command(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(video_path),
+        ]
+    )
+
+    if result.returncode != 0:
+        return 0
+
     try:
-        return float(r.stdout.strip())
+        return float(result.stdout.strip())
     except Exception:
-        return 0.0
+        return 0
 
-def make_clip(src, out, start, length):
-    r = run([
-        "ffmpeg", "-y", "-ss", str(start), "-i", str(src),
-        "-t", str(length),
-        "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,"
-               "pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-        str(out)
-    ])
-    return r.returncode == 0
+
+def make_clip(source, output, start, length):
+    result = run_command(
+        [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(start),
+            "-i",
+            str(source),
+            "-t",
+            str(length),
+            "-vf",
+            "scale=1080:1920:force_original_aspect_ratio=decrease,"
+            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+    )
+
+    return result
+
+
+# -----------------------------
+# Header
+# -----------------------------
+
+st.title("🤖 ZOZO AI")
+st.write("Turn long videos into engaging short clips.")
+
+st.divider()
+
+
+# -----------------------------
+# YouTube URL
+# -----------------------------
+
+url = st.text_input(
+    "🔗 YouTube Video URL",
+    placeholder="Paste your YouTube video link here...",
+)
+
+st.caption(
+    "ZOZO AI works with normal public YouTube video links."
+)
+
+
+# -----------------------------
+# Settings
+# -----------------------------
+
+col1, col2 = st.columns(2)
+
+with col1:
+    clip_length = st.selectbox(
+        "⏱️ Clip Length",
+        [15, 30, 45, 60],
+        index=1,
+    )
+
+with col2:
+    number_of_clips = st.slider(
+        "🎬 Number of Clips",
+        min_value=1,
+        max_value=10,
+        value=1,
+    )
+
+
+# -----------------------------
+# Generate
+# -----------------------------
+
+generate = st.button(
+    "🚀 Generate Clips",
+    type="primary",
+    use_container_width=True,
+)
+
 
 if generate:
+
+    # Validate URL
     if not url.strip():
-        st.error("Please paste a YouTube video link first.")
-        st.stop()
-    if not valid_youtube(url):
-        st.error("Please enter a valid YouTube or youtu.be link.")
+        st.error("Please paste a YouTube video link.")
         st.stop()
 
-    work = Path(tempfile.mkdtemp(prefix="zozo_"))
+    if not valid_youtube(url):
+        st.error("Please enter a valid YouTube or YouTube Shorts link.")
+        st.stop()
+
+    # Temporary working folder
+    work = Path(
+        tempfile.mkdtemp(prefix="zozo_")
+    )
+
     source = work / "source.mp4"
 
     try:
-        with st.status("🤖 ZOZO AI is working...", expanded=True) as status:
+
+        with st.status(
+            "🤖 ZOZO AI is working...",
+            expanded=True,
+        ):
+
             st.write("🔗 Connecting to the video...")
+
+            # -----------------------------
+            # YouTube downloader
+            # -----------------------------
+
             opts = {
-                "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+                "format": "best[height<=1080]/best",
                 "outtmpl": str(source),
                 "merge_output_format": "mp4",
+
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": [
+                            "default",
+                            "tv",
+                            "web_embedded",
+                        ]
+                    }
+                },
+
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
             }
+
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
 
+            st.write("✅ Video downloaded.")
+
+            # -----------------------------
+            # Find downloaded file
+            # -----------------------------
+
             if not source.exists():
+
                 candidates = list(work.glob("*"))
-                mp4s = [p for p in candidates if p.suffix.lower() == ".mp4"]
-                if mp4s:
-                    source = mp4s[0]
+
+                video_candidates = [
+                    p for p in candidates
+                    if p.suffix.lower()
+                    in [".mp4", ".webm", ".mkv", ".mov"]
+                ]
+
+                if video_candidates:
+                    source = video_candidates[0]
 
             if not source.exists():
-                raise RuntimeError("The video could not be downloaded.")
+                raise RuntimeError(
+                    "The video could not be downloaded."
+                )
 
-            total = get_duration(source)
-            if total < 5:
-                raise RuntimeError("The downloaded video is too short or its duration could not be read.")
+            # -----------------------------
+            # Get duration
+            # -----------------------------
 
-            st.write("🧠 Finding highlight candidates...")
-            # Lightweight server-side highlight selection:
-            # choose several well-spaced moments, avoiding the very beginning/end.
-            usable = max(total - duration, 0)
-            if usable <= 0:
+            duration = get_duration(source)
+
+            if duration <= 0:
+                raise RuntimeError(
+                    "Could not read the video duration."
+                )
+
+            st.write(
+                f"📹 Video duration: {duration:.1f} seconds"
+            )
+
+            # -----------------------------
+            # Create clips
+            # -----------------------------
+
+            st.write("✂️ Creating short clips...")
+
+            clip_length_real = min(
+                float(clip_length),
+                duration,
+            )
+
+            max_start = max(
+                0,
+                duration - clip_length_real,
+            )
+
+            if number_of_clips == 1:
                 starts = [0]
             else:
-                count = min(num_clips, max(1, int(total // max(duration * 0.75, 1))))
-                count = min(count, num_clips)
-                if count == 1:
-                    starts = [usable / 2]
-                else:
-                    starts = [usable * i / (count - 1) for i in range(count)]
+                starts = [
+                    max_start * i / (number_of_clips - 1)
+                    for i in range(number_of_clips)
+                ]
 
-            output_dir = work / "clips"
-            output_dir.mkdir()
-            clips = []
+            output_folder = Path("output")
+            output_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
-            st.write("✂️ Creating vertical 9:16 clips...")
-            for i, start in enumerate(starts, 1):
-                out = output_dir / f"ZOZO_AI_Clip_{i}.mp4"
-                length = min(duration, total - start)
-                if make_clip(source, out, start, length):
-                    clips.append(out)
+            generated_clips = []
 
-            if not clips:
-                raise RuntimeError("No clips could be created.")
+            for index, start in enumerate(starts, start=1):
 
-            status.update(label="✅ Your clips are ready!", state="complete")
+                clip_path = (
+                    work / f"zozo_clip_{index}.mp4"
+                )
 
-        st.success(f"Created {len(clips)} clip(s).")
-        st.markdown("### 🎬 Your ZOZO AI clips")
+                result = make_clip(
+                    source,
+                    clip_path,
+                    start,
+                    clip_length_real,
+                )
 
-        for i, clip in enumerate(clips, 1):
-            st.markdown(f"**Clip {i}** · 9:16 vertical")
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        result.stderr[-2000:]
+                    )
+
+                final_path = (
+                    output_folder
+                    / f"zozo_clip_{index}.mp4"
+                )
+
+                shutil.copy2(
+                    clip_path,
+                    final_path,
+                )
+
+                generated_clips.append(
+                    final_path
+                )
+
+            st.write(
+                f"✅ Created {len(generated_clips)} clip(s)."
+            )
+
+        # -----------------------------
+        # Results
+        # -----------------------------
+
+        st.success(
+            "🎉 ZOZO AI finished creating your clips!"
+        )
+
+        st.subheader("🎬 Your Clips")
+
+        for index, clip in enumerate(
+            generated_clips,
+            start=1,
+        ):
+
+            st.write(
+                f"### Clip {index}"
+            )
+
             st.video(str(clip))
-            with open(clip, "rb") as f:
+
+            with open(clip, "rb") as video_file:
+
                 st.download_button(
-                    f"⬇️ Download Clip {i}",
-                    data=f.read(),
+                    label=f"⬇️ Download Clip {index}",
+                    data=video_file,
                     file_name=clip.name,
                     mime="video/mp4",
-                    key=f"download_{i}",
                     use_container_width=True,
                 )
 
-        st.info("💡 This first online version creates smart highlight candidates and converts them to 9:16. Automatic captions, speaker tracking and AI-generated titles are the next upgrades.")
+        st.divider()
 
-    except Exception as e:
-        st.error("ZOZO AI could not process this video.")
-        st.caption(str(e))
+        st.subheader("✨ ZOZO AI Features")
+
+        st.write("✅ YouTube video input")
+        st.write("✅ Up to 1080p source video")
+        st.write("✅ Multiple short clips")
+        st.write("✅ 9:16 vertical format")
+        st.write("✅ Automatic video cropping")
+        st.write("✅ Clip preview")
+        st.write("✅ Download generated clips")
+
+        st.info(
+            "🚀 More AI features such as automatic captions, "
+            "AI-selected viral moments, speaker tracking, "
+            "and AI-generated titles can be added next."
+        )
+
+    except Exception as error:
+
+        st.error(
+            "❌ ZOZO AI could not process this video."
+        )
+
+        st.code(
+            str(error),
+            language="text",
+        )
+
     finally:
-        shutil.rmtree(work, ignore_errors=True)
 
-st.divider()
-st.markdown("### ✨ ZOZO AI")
-cols = st.columns(2)
-with cols[0]:
-    st.markdown("**🎯 Find highlight candidates**")
-    st.markdown("**✂️ Create multiple short clips**")
-    st.markdown("**📱 Convert to 9:16 Shorts**")
-with cols[1]:
-    st.markdown("**▶️ Preview your clips**")
-    st.markdown("**⬇️ Download selected clips**")
-    st.markdown("**📝 Captions & AI titles — next upgrade**")
+        shutil.rmtree(
+            work,
+            ignore_errors=True,
+            )
