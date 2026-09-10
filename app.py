@@ -27,12 +27,15 @@ st.set_page_config(
 ZOZO_HOME = Path.home() / ".zozo_ai"
 
 DENO_VERSION = "2.9.5"
-BGUTIL_VERSION = "1.3.2"
+BGUTIL_VERSION = "2.0.0"
 
 DENO_DIR = ZOZO_HOME / "deno"
 DENO_BIN = DENO_DIR / "deno"
 
-BGUTIL_DIR = ZOZO_HOME / "bgutil-ytdlp-pot-provider"
+BGUTIL_DIR = (
+    ZOZO_HOME
+    / "bgutil-ytdlp-pot-provider"
+)
 
 BGUTIL_PORT = 4416
 
@@ -41,7 +44,11 @@ BGUTIL_PORT = 4416
 # HELPERS
 # ============================================================
 
-def run_command(command, cwd=None, timeout=None):
+def run_command(
+    command,
+    cwd=None,
+    timeout=None,
+):
     result = subprocess.run(
         command,
         cwd=cwd,
@@ -51,7 +58,11 @@ def run_command(command, cwd=None, timeout=None):
     )
 
     if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip()
+        message = (
+            result.stderr.strip()
+            or result.stdout.strip()
+        )
+
         raise RuntimeError(
             message or "Command failed."
         )
@@ -103,11 +114,21 @@ def get_duration(filename):
 def get_deno_asset():
     machine = platform.machine().lower()
 
-    if machine in ("x86_64", "amd64"):
-        return "deno-x86_64-unknown-linux-gnu.zip"
+    if machine in (
+        "x86_64",
+        "amd64",
+    ):
+        return (
+            "deno-x86_64-unknown-linux-gnu.zip"
+        )
 
-    if machine in ("aarch64", "arm64"):
-        return "deno-aarch64-unknown-linux-gnu.zip"
+    if machine in (
+        "aarch64",
+        "arm64",
+    ):
+        return (
+            "deno-aarch64-unknown-linux-gnu.zip"
+        )
 
     raise RuntimeError(
         f"Unsupported CPU architecture: {machine}"
@@ -135,7 +156,9 @@ def install_deno():
         f"download/v{DENO_VERSION}/{asset}"
     )
 
-    zip_path = DENO_DIR / asset
+    zip_path = (
+        DENO_DIR / asset
+    )
 
     try:
         urllib.request.urlretrieve(
@@ -171,7 +194,7 @@ def install_deno():
 
 
 # ============================================================
-# BGUTIL PO TOKEN PROVIDER
+# BGUTIL 2.0.0
 # ============================================================
 
 def provider_is_running():
@@ -190,11 +213,11 @@ def provider_is_running():
 
 
 def install_bgutil_source():
+    server_dir = (
+        BGUTIL_DIR / "server"
+    )
 
-    if (
-        BGUTIL_DIR.exists()
-        and (BGUTIL_DIR / "server").exists()
-    ):
+    if server_dir.exists():
         return
 
     ZOZO_HOME.mkdir(
@@ -213,7 +236,8 @@ def install_bgutil_source():
     url = (
         "https://github.com/Brainicism/"
         "bgutil-ytdlp-pot-provider/"
-        f"archive/refs/tags/{BGUTIL_VERSION}.zip"
+        f"archive/refs/tags/"
+        f"{BGUTIL_VERSION}.zip"
     )
 
     urllib.request.urlretrieve(
@@ -252,7 +276,7 @@ def install_bgutil_source():
 
     if not folders:
         raise RuntimeError(
-            "Could not find bgutil provider source."
+            "Could not find bgutil source."
         )
 
     source_folder = folders[0]
@@ -280,25 +304,17 @@ def install_bgutil_source():
 def start_bgutil_provider(
     deno_path
 ):
-
     if provider_is_running():
         return
 
     install_bgutil_source()
 
     server_dir = (
-        BGUTIL_DIR
-        / "server"
+        BGUTIL_DIR / "server"
     )
 
-    if not server_dir.exists():
-        raise RuntimeError(
-            "bgutil server directory was not found."
-        )
-
     node_modules = (
-        server_dir
-        / "node_modules"
+        server_dir / "node_modules"
     )
 
     if not node_modules.exists():
@@ -311,7 +327,7 @@ def start_bgutil_provider(
                 "--frozen",
             ],
             cwd=server_dir,
-            timeout=600,
+            timeout=900,
         )
 
     command = [
@@ -332,7 +348,7 @@ def start_bgutil_provider(
         start_new_session=True,
     )
 
-    for _ in range(30):
+    for _ in range(45):
 
         if provider_is_running():
             return
@@ -340,13 +356,13 @@ def start_bgutil_provider(
         time.sleep(1)
 
     raise RuntimeError(
-        "YouTube PO-token provider did not start."
+        "The YouTube PO-token provider "
+        "did not start."
     )
 
 
 @st.cache_resource
 def setup_youtube_runtime():
-
     deno_path = install_deno()
 
     start_bgutil_provider(
@@ -357,16 +373,15 @@ def setup_youtube_runtime():
 
 
 # ============================================================
-# DOWNLOAD WITH MWEB + PO TOKEN
+# DOWNLOAD YOUTUBE VIDEO
 # ============================================================
 
-def download_with_mweb(
+def download_youtube_video(
     youtube_url,
     source,
     deno_path,
 ):
-
-    opts = {
+    options = {
         "format": (
             "bv*[height<=1080]+ba/"
             "b[height<=1080]/best"
@@ -382,9 +397,9 @@ def download_with_mweb(
 
         "no_warnings": True,
 
-        "retries": 3,
+        "retries": 5,
 
-        "fragment_retries": 3,
+        "fragment_retries": 5,
 
         "extractor_args": {
             "youtube": {
@@ -408,7 +423,7 @@ def download_with_mweb(
     }
 
     with yt_dlp.YoutubeDL(
-        opts
+        options
     ) as ydl:
 
         ydl.download(
@@ -417,61 +432,7 @@ def download_with_mweb(
 
 
 # ============================================================
-# FALLBACK: WEB SAFARI / HLS
-# ============================================================
-
-def download_with_web_safari(
-    youtube_url,
-    source,
-    deno_path,
-):
-
-    opts = {
-        "format": (
-            "best[protocol*=m3u8]/"
-            "best"
-        ),
-
-        "outtmpl": str(source),
-
-        "merge_output_format": "mp4",
-
-        "noplaylist": True,
-
-        "quiet": True,
-
-        "no_warnings": True,
-
-        "retries": 5,
-
-        "fragment_retries": 5,
-
-        "extractor_args": {
-            "youtube": {
-                "player_client": [
-                    "web_safari"
-                ]
-            }
-        },
-
-        "js_runtimes": {
-            "deno": {
-                "path": deno_path
-            }
-        },
-    }
-
-    with yt_dlp.YoutubeDL(
-        opts
-    ) as ydl:
-
-        ydl.download(
-            [youtube_url]
-        )
-
-
-# ============================================================
-# CLIP CREATION
+# CREATE VERTICAL CLIP
 # ============================================================
 
 def make_clip(
@@ -480,7 +441,6 @@ def make_clip(
     start_time,
     clip_length,
 ):
-
     command = [
         "ffmpeg",
         "-y",
@@ -530,7 +490,7 @@ def make_clip(
 
 
 # ============================================================
-# UI
+# USER INTERFACE
 # ============================================================
 
 st.title(
@@ -538,7 +498,8 @@ st.title(
 )
 
 st.write(
-    "Turn long YouTube videos into engaging short clips."
+    "Turn long YouTube videos "
+    "into engaging short clips."
 )
 
 st.divider()
@@ -549,10 +510,6 @@ youtube_url = st.text_input(
     placeholder=(
         "Paste a public YouTube video link here"
     ),
-)
-
-st.caption(
-    "ZOZO AI works with normal public YouTube videos."
 )
 
 
@@ -579,28 +536,25 @@ generate = st.button(
 
 
 # ============================================================
-# PROCESS
+# GENERATION
 # ============================================================
 
 if generate:
 
     if not youtube_url.strip():
-
         st.error(
             "Please enter a YouTube video URL."
         )
-
         st.stop()
 
 
     if not valid_youtube(
         youtube_url.strip()
     ):
-
         st.error(
-            "Please enter a valid public YouTube URL."
+            "Please enter a valid public "
+            "YouTube URL."
         )
-
         st.stop()
 
 
@@ -611,13 +565,11 @@ if generate:
     )
 
     source = (
-        work
-        / "source.mp4"
+        work / "source.mp4"
     )
 
     output_dir = (
-        work
-        / "clips"
+        work / "clips"
     )
 
     output_dir.mkdir(
@@ -628,14 +580,10 @@ if generate:
 
     try:
 
-        st.info(
-            "🤖 ZOZO AI is preparing..."
-        )
-
         status = st.empty()
 
         status.info(
-            "⚙️ Preparing YouTube download system..."
+            "⚙️ Preparing YouTube system..."
         )
 
         deno_path = (
@@ -643,7 +591,8 @@ if generate:
         )
 
         status.success(
-            "✅ YouTube PO-token provider is ready."
+            "✅ YouTube PO-token provider "
+            "is ready."
         )
 
         status.info(
@@ -651,58 +600,12 @@ if generate:
         )
 
 
-        # ----------------------------------------------------
-        # FIRST METHOD: MWEB + PO TOKEN
-        # ----------------------------------------------------
+        download_youtube_video(
+            youtube_url.strip(),
+            source,
+            deno_path,
+        )
 
-        first_error = None
-
-        try:
-
-            download_with_mweb(
-                youtube_url.strip(),
-                source,
-                deno_path,
-            )
-
-        except Exception as error:
-
-            first_error = error
-
-
-        # ----------------------------------------------------
-        # SECOND METHOD: WEB SAFARI / HLS
-        # ----------------------------------------------------
-
-        if not source.exists():
-
-            status.warning(
-                "⚠️ YouTube rejected the first "
-                "download method. Trying a safe "
-                "HLS fallback..."
-            )
-
-            try:
-
-                download_with_web_safari(
-                    youtube_url.strip(),
-                    source,
-                    deno_path,
-                )
-
-            except Exception as second_error:
-
-                raise RuntimeError(
-                    "YouTube rejected both download "
-                    "methods.\n\n"
-                    f"First method:\n{first_error}\n\n"
-                    f"Fallback method:\n{second_error}"
-                )
-
-
-        # ----------------------------------------------------
-        # CHECK VIDEO
-        # ----------------------------------------------------
 
         if not source.exists():
 
@@ -715,15 +618,14 @@ if generate:
 
 
         if not source.exists():
-
             raise RuntimeError(
-                "The YouTube video was downloaded "
-                "but the video file could not be found."
+                "YouTube did not provide "
+                "a video file."
             )
 
 
         status.success(
-            "✅ YouTube video downloaded successfully!"
+            "✅ YouTube video downloaded!"
         )
 
 
@@ -733,9 +635,8 @@ if generate:
 
 
         if duration <= 0:
-
             raise RuntimeError(
-                "Could not read the video duration."
+                "Could not read video duration."
             )
 
 
@@ -746,7 +647,7 @@ if generate:
 
 
         # ----------------------------------------------------
-        # CLIP POSITIONS
+        # CHOOSE CLIP POSITIONS
         # ----------------------------------------------------
 
         if duration <= actual_clip_length:
@@ -768,10 +669,7 @@ if generate:
             if number_of_clips == 1:
 
                 start_positions = [
-                    max(
-                        0,
-                        available // 2,
-                    )
+                    available // 2
                 ]
 
             else:
@@ -782,7 +680,7 @@ if generate:
                     number_of_clips
                 ):
 
-                    position = int(
+                    start = int(
                         available
                         * i
                         / max(
@@ -792,7 +690,7 @@ if generate:
                     )
 
                     start_positions.append(
-                        position
+                        start
                     )
 
 
@@ -843,7 +741,7 @@ if generate:
         # ----------------------------------------------------
 
         status.success(
-            "🎉 ZOZO AI finished creating your clips!"
+            "🎉 ZOZO AI finished!"
         )
 
         st.divider()
@@ -893,18 +791,12 @@ if generate:
             "❤️ Your clips are ready!"
         )
 
-        st.info(
-            "Automatic captions, AI-selected "
-            "viral moments, speaker tracking, "
-            "and AI-generated titles can be "
-            "added to ZOZO AI next."
-        )
-
 
     except Exception as error:
 
         st.error(
-            "❌ ZOZO AI could not process this video."
+            "❌ ZOZO AI could not "
+            "download/process this video."
         )
 
         st.code(
